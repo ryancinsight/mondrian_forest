@@ -32,6 +32,11 @@ cdef struct Node:
     DOUBLE_t impurity                    # Impurity of the node (i.e., the value of the criterion)
     SIZE_t n_node_samples                # Number of samples at the node
     DOUBLE_t weighted_n_node_samples     # Weighted number of samples at the node
+    DTYPE_t* lower_bounds                # Lower bounds of all features at current node.
+    DTYPE_t* upper_bounds                # Upper bounds of all features at current node.
+    DTYPE_t tau                          # Time of split.
+    DOUBLE_t mean                        # Time of split.
+    DOUBLE_t variance                    # Time of split.
 
 
 cdef class Tree:
@@ -58,14 +63,17 @@ cdef class Tree:
     cdef SIZE_t _add_node(self, SIZE_t parent, bint is_left, bint is_leaf,
                           SIZE_t feature, double threshold, double impurity,
                           SIZE_t n_node_samples,
-                          double weighted_n_samples) nogil except -1
+                          double weighted_n_samples,
+                          DTYPE_t* lower_bounds,
+                          DTYPE_t* upper_bounds,
+                          double E, DOUBLE_t mean) nogil except -1
     cdef int _resize(self, SIZE_t capacity) nogil except -1
     cdef int _resize_c(self, SIZE_t capacity=*) nogil except -1
 
     cdef np.ndarray _get_value_ndarray(self)
     cdef np.ndarray _get_node_ndarray(self)
 
-    cpdef np.ndarray predict(self, object X)
+    cpdef tuple predict(self, object X, bint return_std)
 
     cpdef np.ndarray apply(self, object X)
     cdef np.ndarray _apply_dense(self, object X)
@@ -74,6 +82,7 @@ cdef class Tree:
     cpdef object decision_path(self, object X)
     cdef object _decision_path_dense(self, object X)
     cdef object _decision_path_sparse_csr(self, object X)
+    cpdef object _weights_node(self, object X)
 
     cpdef compute_feature_importances(self, normalize=*)
 

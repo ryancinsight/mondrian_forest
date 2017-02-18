@@ -60,7 +60,8 @@ CRITERIA_REG = {"mse": _criterion.MSE, "friedman_mse": _criterion.FriedmanMSE,
                 "mae": _criterion.MAE}
 
 DENSE_SPLITTERS = {"best": _splitter.BestSplitter,
-                   "random": _splitter.RandomSplitter}
+                   "random": _splitter.RandomSplitter,
+                   "mondrian": _splitter.MondrianSplitter}
 
 SPARSE_SPLITTERS = {"best": _splitter.BestSparseSplitter,
                     "random": _splitter.RandomSparseSplitter}
@@ -362,7 +363,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
 
         return X
 
-    def predict(self, X, check_input=True):
+    def predict(self, X, check_input=True, return_std=False):
         """Predict class or regression value for X.
 
         For a classification model, the predicted class for each sample in X is
@@ -387,11 +388,11 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
         """
         check_is_fitted(self, 'tree_')
         X = self._validate_X_predict(X, check_input)
-        proba = self.tree_.predict(X)
         n_samples = X.shape[0]
 
         # Classification
         if isinstance(self, ClassifierMixin):
+            proba = self.tree_.predict(X)
             if self.n_outputs_ == 1:
                 return self.classes_.take(np.argmax(proba, axis=1), axis=0)
 
@@ -407,11 +408,10 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
 
         # Regression
         else:
-            if self.n_outputs_ == 1:
-                return proba[:, 0]
-
-            else:
-                return proba[:, :, 0]
+            mean_std = self.tree_.predict(X, return_std=return_std)
+            if return_std:
+                return mean_std
+            return mean_std[0]
 
     def apply(self, X, check_input=True):
         """
@@ -467,6 +467,13 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
         """
         X = self._validate_X_predict(X, check_input)
         return self.tree_.decision_path(X)
+
+    def weights_node(self, X, check_input=True):
+        """
+        Returns the weights given to each node when making predictions.
+        """
+        X = self._validate_X_predict(X, check_input)
+        return self.tree_._weights_node(X)
 
     @property
     def feature_importances_(self):
@@ -1108,4 +1115,24 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
             max_features=max_features,
             max_leaf_nodes=max_leaf_nodes,
             min_impurity_split=min_impurity_split,
+            random_state=random_state)
+
+
+class MondrianTreeRegressor(DecisionTreeRegressor):
+    def __init__(self,
+                 splitter="mondrian",
+                 max_depth=None,
+                 min_samples_split=2,
+                 min_samples_leaf=1,
+                 min_weight_fraction_leaf=0.,
+                 max_features=None,
+                 random_state=None):
+        super(MondrianTreeRegressor, self).__init__(
+            criterion="mse",
+            splitter=splitter,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            min_weight_fraction_leaf=min_weight_fraction_leaf,
+            max_features=max_features,
             random_state=random_state)

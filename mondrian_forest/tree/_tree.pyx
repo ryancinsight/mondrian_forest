@@ -18,6 +18,9 @@
 
 from cpython cimport Py_INCREF, PyObject
 
+from libc.math cimport exp
+from libc.math cimport fmax
+from libc.math cimport sqrt
 from libc.stdlib cimport free
 from libc.string cimport memcpy
 from libc.string cimport memset
@@ -67,9 +70,10 @@ cdef SIZE_t INITIAL_STACK_SIZE = 10
 # Repeat struct definition for numpy
 NODE_DTYPE = np.dtype({
     'names': ['left_child', 'right_child', 'feature', 'threshold', 'impurity',
-              'n_node_samples', 'weighted_n_node_samples'],
+              'n_node_samples', 'weighted_n_node_samples', 'tau', 'mean',
+              'variance'],
     'formats': [np.intp, np.intp, np.intp, np.float64, np.float64, np.intp,
-                np.float64],
+                np.float64, np.float32, np.float64, np.float64],
     'offsets': [
         <Py_ssize_t> &(<Node*> NULL).left_child,
         <Py_ssize_t> &(<Node*> NULL).right_child,
@@ -77,7 +81,10 @@ NODE_DTYPE = np.dtype({
         <Py_ssize_t> &(<Node*> NULL).threshold,
         <Py_ssize_t> &(<Node*> NULL).impurity,
         <Py_ssize_t> &(<Node*> NULL).n_node_samples,
-        <Py_ssize_t> &(<Node*> NULL).weighted_n_node_samples
+        <Py_ssize_t> &(<Node*> NULL).weighted_n_node_samples,
+        <Py_ssize_t> &(<Node*> NULL).tau,
+        <Py_ssize_t> &(<Node*> NULL).mean,
+        <Py_ssize_t> &(<Node*> NULL).variance,
     ]
 })
 
@@ -189,6 +196,7 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
         cdef bint first = 1
         cdef SIZE_t max_depth_seen = -1
         cdef int rc = 0
+        cdef DTYPE_t mean
 
         cdef Stack stack = Stack(INITIAL_STACK_SIZE)
         cdef StackRecord stack_record
@@ -228,12 +236,19 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                            (impurity <= min_impurity_split))
 
                 if not is_leaf:
-                    splitter.node_split(impurity, &split, &n_constant_features)
+                    is_leaf = splitter.node_split(impurity, &split, &n_constant_features)
                     is_leaf = is_leaf or (split.pos >= end)
+                else:
+                    splitter.set_bounds(&split)
 
+                mean = splitter.criterion.sum_total[0] / weighted_n_node_samples
                 node_id = tree._add_node(parent, is_left, is_leaf, split.feature,
                                          split.threshold, impurity, n_node_samples,
-                                         weighted_n_node_samples)
+                                         weighted_n_node_samples,
+                                         split.lower_bounds,
+                                         split.upper_bounds,
+                                         split.E,
+                                         mean)
 
                 if node_id == <SIZE_t>(-1):
                     rc = -1
@@ -380,6 +395,18 @@ cdef class Tree:
         def __get__(self):
             return self._get_value_ndarray()[:self.node_count]
 
+    property tau:
+        def __get__(self):
+            return self._get_node_ndarray()["tau"][:self.node_count]
+
+    property mean:
+        def __get__(self):
+            return self._get_node_ndarray()["mean"][:self.node_count]
+
+    property variance:
+        def __get__(self):
+            return self._get_node_ndarray()["variance"][:self.node_count]
+
     def __cinit__(self, int n_features, np.ndarray[SIZE_t, ndim=1] n_classes,
                   int n_outputs):
         """Constructor."""
@@ -504,7 +531,10 @@ cdef class Tree:
     cdef SIZE_t _add_node(self, SIZE_t parent, bint is_left, bint is_leaf,
                           SIZE_t feature, double threshold, double impurity,
                           SIZE_t n_node_samples,
-                          double weighted_n_node_samples) nogil except -1:
+                          double weighted_n_node_samples,
+                          DTYPE_t* lower_bounds,
+                          DTYPE_t* upper_bounds,
+                          double E, DOUBLE_t mean) nogil except -1:
         """Add a node to the tree.
 
         The new node registers itself as the child of its parent.
@@ -528,28 +558,29 @@ cdef class Tree:
             else:
                 self.nodes[parent].right_child = node_id
 
+        if parent == _TREE_UNDEFINED:
+            node.tau = E
+        elif is_leaf:
+            node.tau = INFINITY
+        else:
+            node.tau = E + self.nodes[parent].tau
+
+        node.lower_bounds = lower_bounds
+        node.upper_bounds = upper_bounds
+        node.mean = mean
+        node.variance = impurity
+
         if is_leaf:
             node.left_child = _TREE_LEAF
             node.right_child = _TREE_LEAF
             node.feature = _TREE_UNDEFINED
             node.threshold = _TREE_UNDEFINED
-
         else:
             # left_child and right_child will be set later
             node.feature = feature
             node.threshold = threshold
-
         self.node_count += 1
-
         return node_id
-
-    cpdef np.ndarray predict(self, object X):
-        """Predict target for X."""
-        out = self._get_value_ndarray().take(self.apply(X), axis=0,
-                                             mode='clip')
-        if self.n_outputs == 1:
-            out = out.reshape(X.shape[0], self.max_n_classes)
-        return out
 
     cpdef np.ndarray apply(self, object X):
         """Finds the terminal region (=leaf node) for each sample in X."""
@@ -557,6 +588,97 @@ cdef class Tree:
             return self._apply_sparse_csr(X)
         else:
             return self._apply_dense(X)
+
+    cpdef tuple predict(self, object X, bint return_std):
+        """Finds the terminal region (=leaf node) for each sample in X."""
+
+        # Check input
+        if not isinstance(X, np.ndarray):
+            raise ValueError("X should be in np.ndarray format, got %s"
+                             % type(X))
+
+        if X.dtype != DTYPE:
+            raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
+
+        # Extract input
+        cdef np.ndarray X_ndarray = X
+        cdef DTYPE_t* X_ptr = <DTYPE_t*> X_ndarray.data
+        cdef SIZE_t X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
+        cdef SIZE_t X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
+        cdef SIZE_t n_samples = X.shape[0]
+        cdef SIZE_t n_features = X.shape[1]
+        cdef SIZE_t f_ind
+
+        # Initialize output
+        cdef np.ndarray[DTYPE_t, ndim=1] mean = np.zeros(n_samples, dtype=DTYPE)
+        cdef np.ndarray[DTYPE_t, ndim=1] std = np.zeros(n_samples, dtype=DTYPE)
+
+        # Initialize auxiliary data-structure
+        cdef Node* node = NULL
+        cdef SIZE_t i = 0
+        cdef DOUBLE_t Delta = 0.0
+        cdef DOUBLE_t parent_tau
+        cdef DOUBLE_t p_js
+        cdef DOUBLE_t X_val
+        cdef DOUBLE_t w_j
+
+        # P_{notseparatedy}
+        cdef DOUBLE_t p_nsy
+        cdef SIZE_t sample_ind
+
+        with nogil:
+            for i in range(n_samples):
+                parent_tau = 0.0
+                p_nsy = 1.0
+                node = self.nodes
+
+                while True:
+
+                    # Calculate Delta
+                    Delta = node.tau - parent_tau
+                    parent_tau = node.tau
+
+                    # Algorithm 6.5
+                    # Calculate eta
+                    eta = 0.0
+                    for f_ind in range(n_features):
+                        X_val = X_ptr[X_sample_stride*i + X_fx_stride*f_ind]
+
+                        # Algorithm 5
+                        eta += (fmax(X_val - node.upper_bounds[f_ind], 0) +
+                                fmax(node.lower_bounds[f_ind] - X_val, 0))
+
+                    # Algorithm 6
+                    p_js = 1 - exp(-Delta * eta)
+
+                    if node.left_child == _TREE_LEAF:
+                        w_j = p_nsy
+                    else:
+                        w_j = p_nsy * p_js
+
+                    mean[i] += w_j * node.mean
+
+                    if return_std:
+                        std[i] += w_j * (node.mean**2 + node.variance)
+
+                    if node.left_child == _TREE_LEAF:
+                        break
+                    p_nsy = p_nsy * (1 - p_js)
+
+                    if X_ptr[X_sample_stride * i +
+                             X_fx_stride * node.feature] <= node.threshold:
+                        node = &self.nodes[node.left_child]
+                    else:
+                        node = &self.nodes[node.right_child]
+
+                if return_std:
+                    std[i] -= mean[i]**2
+                    std[i] = sqrt(std[i])
+
+        if return_std:
+            return mean, std
+        return mean,
+
 
     cdef inline np.ndarray _apply_dense(self, object X):
         """Finds the terminal region (=leaf node) for each sample in X."""
@@ -575,6 +697,8 @@ cdef class Tree:
         cdef SIZE_t X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
         cdef SIZE_t X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
         cdef SIZE_t n_samples = X.shape[0]
+        cdef SIZE_t n_features = X.shape[1]
+        cdef SIZE_t f_ind
 
         # Initialize output
         cdef np.ndarray[SIZE_t] out = np.zeros((n_samples,), dtype=np.intp)
@@ -681,6 +805,97 @@ cdef class Tree:
             return self._decision_path_sparse_csr(X)
         else:
             return self._decision_path_dense(X)
+
+    cpdef object _weights_node(self, object X):
+        """Returns the weight at each node for each sample in X."""
+        if not isinstance(X, np.ndarray):
+            raise ValueError("X should be in np.ndarray format, got %s"
+                             % type(X))
+
+        if X.dtype != DTYPE:
+            raise ValueError("X.dtype should be np.float32, got %s" % X.dtype)
+
+        # Extract input
+        cdef np.ndarray X_ndarray = X
+        cdef DTYPE_t* X_ptr = <DTYPE_t*> X_ndarray.data
+        cdef SIZE_t X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
+        cdef SIZE_t X_fx_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
+        cdef SIZE_t n_samples = X.shape[0]
+        cdef SIZE_t n_features = X.shape[1]
+
+        # Initialize output
+        cdef np.ndarray[SIZE_t] indptr = np.zeros(n_samples + 1, dtype=np.intp)
+        cdef SIZE_t* indptr_ptr = <SIZE_t*> indptr.data
+
+        cdef np.ndarray[SIZE_t] indices = np.zeros(n_samples *
+                                                   (1 + self.max_depth),
+                                                   dtype=np.intp)
+        cdef SIZE_t* indices_ptr = <SIZE_t*> indices.data
+
+        cdef np.ndarray[DTYPE_t] values = np.zeros(n_samples *
+                                                (1 + self.max_depth),
+                                                 dtype=DTYPE)
+        cdef DTYPE_t* values_ptr = <DTYPE_t*> values.data
+
+        # Initialize auxiliary data-structure
+        cdef Node* node = NULL
+        cdef SIZE_t i = 0
+
+        cdef DTYPE_t parent_tau
+        cdef DTYPE_t delta
+        cdef DTYPE_t eta
+        cdef SIZE_t f_ind
+        cdef DTYPE_t X_val
+        cdef DTYPE_t p_s
+        cdef DTYPE_t p_nsy
+
+        with nogil:
+            for i in range(n_samples):
+                p_nsy = 1.0
+                node = self.nodes
+                parent_tau = 0.0
+
+                indptr_ptr[i + 1] = indptr_ptr[i]
+
+                # Add all external nodes
+                while node.left_child != _TREE_LEAF:
+
+                    delta = node.tau - parent_tau
+                    parent_tau = node.tau
+
+                    eta = 0.0
+                    for f_ind in range(n_features):
+                        X_val = X_ptr[X_sample_stride * i + X_fx_stride * f_ind]
+                        eta += (fmax(X_val - node.upper_bounds[f_ind], 0.0) +
+                                fmax(node.lower_bounds[f_ind] - X_val, 0.0))
+                    p_s = 1 - exp(-delta*eta)
+
+                    if p_s > 0:
+                        # ... and node.right_child != _TREE_LEAF:
+                        indices_ptr[indptr_ptr[i + 1]] = <SIZE_t>(node - self.nodes)
+                        values_ptr[indptr_ptr[i + 1]] = p_s * p_nsy
+                        indptr_ptr[i + 1] += 1
+
+                    if X_ptr[X_sample_stride * i +
+                             X_fx_stride * node.feature] <= node.threshold:
+                        node = &self.nodes[node.left_child]
+                    else:
+                        node = &self.nodes[node.right_child]
+                    p_nsy *= (1 - p_s)
+
+                # Add the leave node
+                indices_ptr[indptr_ptr[i + 1]] = <SIZE_t>(node - self.nodes)
+                values_ptr[indptr_ptr[i + 1]] = p_nsy
+                indptr_ptr[i + 1] += 1
+
+        indices = indices[:indptr[n_samples]]
+        values = values[:indptr[n_samples]]
+        out = csr_matrix((values, indices, indptr),
+                         shape=(n_samples, self.node_count))
+
+        return out
+
+
 
     cdef inline object _decision_path_dense(self, object X):
         """Finds the decision path (=node) for each sample in X."""
