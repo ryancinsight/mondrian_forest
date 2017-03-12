@@ -8,6 +8,9 @@ def configuration(parent_package='', top_path=None):
     config = Configuration('mondrian_forest', parent_package, top_path)
     config.add_subpackage('tree')
 
+    message = ('Please install cython with a version >= {0} in order '
+               'to build a scikit-learn development version.').format(
+               CYTHON_MIN_VERSION)
     try:
         import Cython
         if LooseVersion(Cython.__version__) < CYTHON_MIN_VERSION:
