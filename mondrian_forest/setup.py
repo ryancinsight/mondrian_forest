@@ -1,12 +1,24 @@
-from sklearn._build_utils import maybe_cythonize_extensions
+from distutils.version import LooseVersion
 
+CYTHON_MIN_VERSION = '0.23'
 
 def configuration(parent_package='', top_path=None):
     from numpy.distutils.misc_util import Configuration
 
     config = Configuration('mondrian_forest', parent_package, top_path)
     config.add_subpackage('tree')
-    maybe_cythonize_extensions(top_path, config)
+
+    try:
+        import Cython
+        if LooseVersion(Cython.__version__) < CYTHON_MIN_VERSION:
+            message += ' Your version of Cython was {0}.'.format(
+                Cython.__version__)
+            raise ValueError(message)
+        from Cython.Build import cythonize
+    except ImportError as exc:
+        exc.args += (message,)
+        raise
+    config.ext_modules = cythonize(config.ext_modules)
 
     return config
 
