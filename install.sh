@@ -27,6 +27,7 @@ popd
 # provided versions
 conda create -n testenv --yes python=$PYTHON_VERSION pip nose \
    numpy scipy scikit-learn
+source activate testenv
 
 python --version
 python -c "import numpy; print('numpy %s' % numpy.__version__)"
