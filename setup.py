@@ -5,6 +5,7 @@
 import sys
 import os
 import setuptools
+import numpy
 from numpy.distutils.core import setup
 
 
