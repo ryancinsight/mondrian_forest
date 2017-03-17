@@ -332,13 +332,6 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
                                             min_samples_leaf,
                                             min_weight_leaf,
                                             max_depth, self.min_impurity_split)
-        else:
-            builder = BestFirstTreeBuilder(splitter, min_samples_split,
-                                           min_samples_leaf,
-                                           min_weight_leaf,
-                                           max_depth,
-                                           max_leaf_nodes,
-                                           self.min_impurity_split)
 
         builder.build(self.tree_, X, y, sample_weight, X_idx_sorted)
 
@@ -1105,8 +1098,7 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
                  min_weight_fraction_leaf=0.,
                  max_features="auto",
                  random_state=None,
-                 min_impurity_split=1e-7,
-                 max_leaf_nodes=None):
+                 min_impurity_split=1e-7):
         super(ExtraTreeRegressor, self).__init__(
             criterion=criterion,
             splitter=splitter,
