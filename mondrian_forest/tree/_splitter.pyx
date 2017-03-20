@@ -240,7 +240,7 @@ cdef class Splitter:
 
         return self.criterion.node_impurity()
 
-    cdef void set_bounds(self, SplitRecord* split) nogil:
+    cdef void set_bounds(self) nogil:
         pass
 
 cdef class BaseDenseSplitter(Splitter):
@@ -649,6 +649,7 @@ cdef void heapsort(DTYPE_t* Xf, SIZE_t* samples, SIZE_t n) nogil:
 
 
 cdef class MondrianSplitter(BaseDenseSplitter):
+
     def __reduce__(self):
         return (MondrianSplitter, (self.criterion,
                                    self.max_features,
@@ -657,11 +658,11 @@ cdef class MondrianSplitter(BaseDenseSplitter):
                                    self.random_state,
                                    self.presort), self.__getstate__())
 
-    cdef void set_bounds(self, SplitRecord* split) nogil:
+    cdef void set_bounds(self) nogil:
         cdef SIZE_t n_features = self.n_features
 
-        cdef DTYPE_t* upper_bounds = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
-        cdef DTYPE_t* lower_bounds = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
+        self.upper_bounds = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
+        self.lower_bounds = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
         cdef DTYPE_t upper_bound
         cdef DTYPE_t lower_bound
         cdef DTYPE_t* X = self.X
@@ -685,11 +686,8 @@ cdef class MondrianSplitter(BaseDenseSplitter):
                     lower_bound = current_f
                 if current_f > upper_bound:
                     upper_bound = current_f
-            upper_bounds[f_j] = upper_bound
-            lower_bounds[f_j] = lower_bound
-
-        split.lower_bounds = lower_bounds
-        split.upper_bounds = upper_bounds
+            self.upper_bounds[f_j] = upper_bound
+            self.lower_bounds[f_j] = lower_bound
 
     cdef int node_split(self, double impurity, SplitRecord* split,
                         SIZE_t* n_constant_features) nogil except -1:
@@ -727,11 +725,11 @@ cdef class MondrianSplitter(BaseDenseSplitter):
         cdef DTYPE_t* cum_diff = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
         cdef DTYPE_t search
 
-        self.set_bounds(split)
+        self.set_bounds()
         # Sample E from sum(u_{d} - l_{d})
         for f_j in range(n_features):
-            upper_bound = split.upper_bounds[f_j]
-            lower_bound = split.lower_bounds[f_j]
+            upper_bound = self.upper_bounds[f_j]
+            lower_bound = self.lower_bounds[f_j]
             cum_diff[f_j] = upper_bound - lower_bound
 
             if f_j != 0:
@@ -754,8 +752,8 @@ cdef class MondrianSplitter(BaseDenseSplitter):
 
         # Sample location xi uniformly between (l_d[delta], u_d[delta])
         split.threshold = rand_uniform(
-            split.lower_bounds[split.feature],
-            split.upper_bounds[split.feature],
+            self.lower_bounds[split.feature],
+            self.upper_bounds[split.feature],
             random_state)
 
         # Reorganize into samples[start:best.pos] + samples[best.pos:end]

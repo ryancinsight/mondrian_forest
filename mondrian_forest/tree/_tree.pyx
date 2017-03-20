@@ -239,14 +239,14 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
                     is_leaf = splitter.node_split(impurity, &split, &n_constant_features)
                     is_leaf = is_leaf or (split.pos >= end)
                 else:
-                    splitter.set_bounds(&split)
+                    splitter.set_bounds()
 
                 mean = splitter.criterion.sum_total[0] / weighted_n_node_samples
                 node_id = tree._add_node(parent, is_left, is_leaf, split.feature,
                                          split.threshold, impurity, n_node_samples,
                                          weighted_n_node_samples,
-                                         split.lower_bounds,
-                                         split.upper_bounds,
+                                         splitter.lower_bounds,
+                                         splitter.upper_bounds,
                                          split.E,
                                          mean)
 
