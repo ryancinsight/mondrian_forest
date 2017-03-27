@@ -22,6 +22,7 @@ from libc.math cimport exp
 from libc.math cimport fmax
 from libc.math cimport sqrt
 from libc.stdlib cimport free
+from libc.stdlib cimport malloc
 from libc.string cimport memcpy
 from libc.string cimport memset
 
@@ -565,8 +566,10 @@ cdef class Tree:
         else:
             node.tau = E + self.nodes[parent].tau
 
-        node.lower_bounds = lower_bounds
-        node.upper_bounds = upper_bounds
+        node.lower_bounds = <DTYPE_t*> malloc(self.n_features * sizeof(DTYPE_t))
+        node.upper_bounds = <DTYPE_t*> malloc(self.n_features * sizeof(DTYPE_t))
+        memcpy(node.lower_bounds, lower_bounds, self.n_features*sizeof(DTYPE_t))
+        memcpy(node.upper_bounds, upper_bounds, self.n_features*sizeof(DTYPE_t))
         node.mean = mean
         node.variance = impurity
 

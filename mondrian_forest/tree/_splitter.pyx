@@ -650,6 +650,10 @@ cdef void heapsort(DTYPE_t* Xf, SIZE_t* samples, SIZE_t n) nogil:
 
 cdef class MondrianSplitter(BaseDenseSplitter):
 
+    def __dealloc__(self):
+        free(self.lower_bounds)
+        free(self.upper_bounds)
+
     def __reduce__(self):
         return (MondrianSplitter, (self.criterion,
                                    self.max_features,
@@ -661,8 +665,8 @@ cdef class MondrianSplitter(BaseDenseSplitter):
     cdef void set_bounds(self) nogil:
         cdef SIZE_t n_features = self.n_features
 
-        self.upper_bounds = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
-        self.lower_bounds = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
+        safe_realloc(&self.lower_bounds, n_features)
+        safe_realloc(&self.upper_bounds, n_features)
         cdef DTYPE_t upper_bound
         cdef DTYPE_t lower_bound
         cdef DTYPE_t* X = self.X
