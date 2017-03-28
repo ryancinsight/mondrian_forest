@@ -153,26 +153,31 @@ def test_dimension_location():
     y = rng.randn(100)
 
     mtr = MondrianTreeRegressor(random_state=0, max_depth=1)
-    n = 200
-    diff = np.max(X, axis=0) - np.min(X, axis=0)
-    expected = diff / np.sum(diff) * n
+    n = 1000
 
     features = []
     thresholds = []
-    for random_state in np.arange(200):
+    for random_state in np.arange(1000):
         mtr.set_params(random_state=random_state).fit(X, y)
         features.append(mtr.tree_.feature[0])
         thresholds.append(mtr.tree_.threshold[0])
 
+    # Check that this converges to the actual probability p of the bernoulli.
+    diff = np.max(X, axis=0) - np.min(X, axis=0)
+    p_act = diff / np.sum(diff)
     features = np.array(features)
     thresholds = np.array(thresholds)
     counts = np.bincount(features)
-    calc_thresh = np.mean(thresholds[features == 1])
-    exp_thresh = np.mean(X, axis=0)[-1]
+    p_sim = counts / np.sum(counts)
+    assert_array_almost_equal(p_act, p_sim, 2)
 
-    assert_less(expected[-1] - 5, counts[-1])
-    assert_less(calc_thresh, exp_thresh + 3.0)
-    assert_less(exp_thresh - 3.0, calc_thresh)
+    # Check that the split location converges to the (u + l) / 2 where
+    # u and l are the upper and lower bounds of the feature.
+    u = np.max(X, axis=0)[-1]
+    l = np.min(X, axis=0)[-1]
+    thresh_sim = np.mean(thresholds[features == 1])
+    thresh_act = (u + l) / 2.0
+    assert_array_almost_equal(thresh_act, thresh_sim, 2)
 
 
 def test_node_weights():
