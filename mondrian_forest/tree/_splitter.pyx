@@ -730,7 +730,6 @@ cdef class MondrianSplitter(BaseDenseSplitter):
         cdef SIZE_t X_sample_stride = self.X_sample_stride
         cdef SIZE_t X_feature_stride = self.X_feature_stride
         cdef SIZE_t max_features = self.max_features
-        cdef SIZE_t min_samples_leaf = self.min_samples_leaf
         cdef double min_weight_leaf = self.min_weight_leaf
         cdef UINT32_t* random_state = &self.rand_r_state
 
@@ -791,8 +790,6 @@ cdef class MondrianSplitter(BaseDenseSplitter):
 
         # Leaf node since split results in number of samples in the leaf
         # to be less than min_samples_leaf.
-        if p - start < min_samples_leaf or end - p < min_samples_leaf:
-            return 1
         split.pos = p
         self.criterion.reset()
         self.criterion.update(split.pos)

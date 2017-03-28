@@ -625,35 +625,37 @@ cdef class Tree:
         cdef DOUBLE_t X_val
         cdef DOUBLE_t w_j
 
-        # P_{notseparatedy}
+        # Algorithm 6.5
         cdef DOUBLE_t p_nsy
         cdef SIZE_t sample_ind
 
         with nogil:
             for i in range(n_samples):
+                # Step 3
                 parent_tau = 0.0
                 p_nsy = 1.0
                 node = self.nodes
 
                 while True:
 
+                    # Step 5: First part.
                     # Calculate Delta
                     Delta = node.tau - parent_tau
                     parent_tau = node.tau
 
-                    # Algorithm 6.5
+                    # Step 5: Second part.
                     # Calculate eta
                     eta = 0.0
                     for f_ind in range(n_features):
                         X_val = X_ptr[X_sample_stride*i + X_fx_stride*f_ind]
 
-                        # Algorithm 5
                         eta += (fmax(X_val - node.upper_bounds[f_ind], 0) +
                                 fmax(node.lower_bounds[f_ind] - X_val, 0))
 
-                    # Algorithm 6
+                    # Step 6: Calculate p_j
                     p_js = 1 - exp(-Delta * eta)
 
+                    # Step 7-11
                     if node.left_child == _TREE_LEAF:
                         w_j = p_nsy
                     else:
@@ -668,6 +670,7 @@ cdef class Tree:
                         break
                     p_nsy = p_nsy * (1 - p_js)
 
+                    # Step 12-14
                     if X_ptr[X_sample_stride * i +
                              X_fx_stride * node.feature] <= node.threshold:
                         node = &self.nodes[node.left_child]

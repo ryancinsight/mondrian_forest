@@ -229,10 +229,3 @@ def test_node_weights():
     means2, std2 = mtr.predict(X_test, return_std=True)
     assert_array_almost_equal(means1, means2, 5)
     assert_array_almost_equal(variances1, std2**2, 3)
-
-
-def test_min_samples_leaf():
-    X, y = make_regression(random_state=0)
-    mtr = MondrianTreeRegressor(random_state=0, min_samples_leaf=5)
-    mtr.fit(X, y)
-    assert_array_less(4.0*np.ones(mtr.tree_.node_count), mtr.tree_.n_node_samples)
