@@ -1120,7 +1120,6 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
 
 class MondrianTreeRegressor(DecisionTreeRegressor):
     def __init__(self,
-                 splitter="mondrian",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
@@ -1129,10 +1128,8 @@ class MondrianTreeRegressor(DecisionTreeRegressor):
                  random_state=None):
         super(MondrianTreeRegressor, self).__init__(
             criterion="mse",
-            splitter=splitter,
+            splitter="mondrian",
             max_depth=max_depth,
             min_samples_split=min_samples_split,
             min_samples_leaf=min_samples_leaf,
-            min_weight_fraction_leaf=min_weight_fraction_leaf,
-            max_features=max_features,
             random_state=random_state)

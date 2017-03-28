@@ -64,8 +64,8 @@ cdef class Splitter:
     cdef DOUBLE_t* y
     cdef SIZE_t y_stride
     cdef DOUBLE_t* sample_weight
-    cdef DTYPE_t* upper_bounds
-    cdef DTYPE_t* lower_bounds
+    cdef DTYPE_t* upper_bounds           # Store the upper_bounds
+    cdef DTYPE_t* lower_bounds           # Store the lower bounds
 
 
     # The samples vector `samples` is maintained by the Splitter object such
