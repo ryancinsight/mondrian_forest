@@ -695,10 +695,26 @@ cdef class MondrianSplitter(BaseDenseSplitter):
 
     cdef int node_split(self, double impurity, SplitRecord* split,
                         SIZE_t* n_constant_features) nogil except -1:
-        """Find the best random split on node samples[start:end]
+        """Find the mondrian split on node samples[start:end]
+
+        In contrast to the standard decision-tree split, the split
+        feature and split threshold is determined independent of the labels.
+
+        1. The upper bounds u_j and lower bounds l_j of all features in a
+           given node j are determined.
+        2. The split feature is drawn with a probability proportional to
+           u_j - l_j.
+        3. After choosing the split feature delta, the split location is drawn
+           uniformly between the upper and lower bound of the split feature.
 
         Returns -1 in case of failure to allocate memory (and raise MemoryError)
         or 0 otherwise.
+
+        References
+        ----------
+        * Tian Zhang, Raghu Ramakrishnan, Maron Livny
+          Pg 82, Algorithm 6.1 and 6.2
+          http://www.gatsby.ucl.ac.uk/~balaji/balaji-phd-thesis.pdf
         """
         # Draw random splits and pick the best
         cdef SIZE_t* samples = self.samples
