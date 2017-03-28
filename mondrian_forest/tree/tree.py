@@ -1123,8 +1123,6 @@ class MondrianTreeRegressor(DecisionTreeRegressor):
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
-                 min_weight_fraction_leaf=0.,
-                 max_features=None,
                  random_state=None):
         super(MondrianTreeRegressor, self).__init__(
             criterion="mse",
