@@ -82,7 +82,7 @@ cdef class Tree:
     cpdef object decision_path(self, object X)
     cdef object _decision_path_dense(self, object X)
     cdef object _decision_path_sparse_csr(self, object X)
-    cpdef object _weights_node(self, object X)
+    cpdef object weighted_decision_path(self, object X)
 
     cpdef compute_feature_importances(self, normalize=*)
 

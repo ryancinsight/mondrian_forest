@@ -468,12 +468,12 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
         X = self._validate_X_predict(X, check_input)
         return self.tree_.decision_path(X)
 
-    def weights_node(self, X, check_input=True):
+    def weighted_decision_path(self, X, check_input=True):
         """
         Returns the weights given to each node when making predictions.
         """
         X = self._validate_X_predict(X, check_input)
-        return self.tree_._weights_node(X)
+        return self.tree_.weighted_decision_path(X)
 
     @property
     def feature_importances_(self):

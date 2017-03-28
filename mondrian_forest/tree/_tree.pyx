@@ -809,7 +809,7 @@ cdef class Tree:
         else:
             return self._decision_path_dense(X)
 
-    cpdef object _weights_node(self, object X):
+    cpdef object weighted_decision_path(self, object X):
         """Returns the weight at each node for each sample in X."""
         if not isinstance(X, np.ndarray):
             raise ValueError("X should be in np.ndarray format, got %s"

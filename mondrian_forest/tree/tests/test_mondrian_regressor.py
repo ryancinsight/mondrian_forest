@@ -196,14 +196,14 @@ def test_node_weights():
     mtr = MondrianTreeRegressor(random_state=0)
     mtr.fit(X_train, y_train)
     leaf_nodes = mtr.apply(X_train)
-    weights_sparse = mtr.weights_node(X_train)
+    weights_sparse = mtr.weighted_decision_path(X_train)
     assert_array_equal(weights_sparse.data, np.ones(X_train.shape[0]))
     assert_array_equal(weights_sparse.indices, leaf_nodes)
     assert_array_equal(weights_sparse.indptr, np.arange(n_train + 1))
 
     # Test prediction using the node_weights function gives similar results
     # to that using the prediction method.
-    weights = mtr.weights_node(X_test)
+    weights = mtr.weighted_decision_path(X_test)
     node_means = mtr.tree_.mean
     node_variances = mtr.tree_.variance
     variances1 = []
