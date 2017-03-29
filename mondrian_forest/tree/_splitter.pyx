@@ -649,6 +649,7 @@ cdef void heapsort(DTYPE_t* Xf, SIZE_t* samples, SIZE_t n) nogil:
 
 
 cdef class MondrianSplitter(BaseDenseSplitter):
+    """Splitter that samples a tree from a mondrian process."""
 
     def __dealloc__(self):
         free(self.lower_bounds)
@@ -712,11 +713,11 @@ cdef class MondrianSplitter(BaseDenseSplitter):
 
         References
         ----------
-        * Tian Zhang, Raghu Ramakrishnan, Maron Livny
+        * Balaji Lakshminarayanan,
+          Decision Trees and Forests: A probabilistic perspective.
           Pg 82, Algorithm 6.1 and 6.2
           http://www.gatsby.ucl.ac.uk/~balaji/balaji-phd-thesis.pdf
         """
-        # Draw random splits and pick the best
         cdef SIZE_t* samples = self.samples
         cdef SIZE_t start = self.start
         cdef SIZE_t end = self.end
@@ -788,8 +789,6 @@ cdef class MondrianSplitter(BaseDenseSplitter):
                 samples[partition_end] = samples[p]
                 samples[p] = tmp
 
-        # Leaf node since split results in number of samples in the leaf
-        # to be less than min_samples_leaf.
         split.pos = p
         self.criterion.reset()
         self.criterion.update(split.pos)
