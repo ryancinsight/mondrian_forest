@@ -381,6 +381,9 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
             Allow to bypass several input checking.
             Don't use this parameter unless you know what you do.
 
+        return_std : boolean, (default=True)
+            Whether or not to return the standard deviation.
+
         Returns
         -------
         y : array of shape = [n_samples] or [n_samples, n_outputs]
@@ -463,14 +466,33 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
         indicator : sparse csr array, shape = [n_samples, n_nodes]
             Return a node indicator matrix where non zero elements
             indicates that the samples goes through the nodes.
-
         """
         X = self._validate_X_predict(X, check_input)
         return self.tree_.decision_path(X)
 
     def weighted_decision_path(self, X, check_input=True):
         """
-        Returns the weights given to each node when making predictions.
+        Returns the weighted decision path in the tree.
+
+        Each non-zero value in the decision path determines the weight
+        of that particular node in making predictions.
+
+        Parameters
+        ----------
+        X : array_like or sparse matrix, shape = [n_samples, n_features]
+            The input samples. Internally, it will be converted to
+            ``dtype=np.float32`` and if a sparse matrix is provided
+            to a sparse ``csr_matrix``.
+
+        check_input : boolean, (default=True)
+            Allow to bypass several input checking.
+            Don't use this parameter unless you know what you do.
+
+        Returns
+        -------
+        indicator : sparse csr array, shape = [n_samples, n_nodes]
+            Return a node indicator matrix where non zero elements
+            indicate the weight of that particular node in making predictions.
         """
         X = self._validate_X_predict(X, check_input)
         return self.tree_.weighted_decision_path(X)
@@ -1119,6 +1141,51 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
 
 
 class MondrianTreeRegressor(DecisionTreeRegressor):
+    """A Mondrian tree regressor.
+
+    The splits in a mondrian tree regressor differ from the standard regression
+    tree in the following ways.
+
+    At fit time:
+        - Splits are done independently of the labels.
+        - The candidate feature is drawn with a probability proportional to the
+          feature range.
+        - The candidate threshold is drawn from a uniform distribution
+          with the bounds equal to the bounds of the candidate feature.
+        - The time of split is also stored which is proportional to the
+          inverse of the size of the bounding-box.
+
+    At prediction time:
+        - Every node in the path from the root to the leaf is given a weight
+          while making predictions.
+        - At each node, the probability of an unseen sample splitting from that
+          node is calculated. The farther the sample is away from the bounding
+          box, the more probable that it will split away.
+        - For every node, the probability that an unseen sample has not split
+          before reaching that node and the probability that it will split away
+          at that particular node are multiplied to give a weight.
+
+    Parameters
+    ----------
+    max_depth : int or None, optional (default=None)
+        The maximum depth of the tree. If None, then nodes are expanded until
+        all leaves are pure or until all leaves contain less than
+        min_samples_split samples.
+
+    min_samples_split : int, float, optional (default=2)
+        The minimum number of samples required to split an internal node:
+
+        - If int, then consider `min_samples_split` as the minimum number.
+        - If float, then `min_samples_split` is a percentage and
+          `ceil(min_samples_split * n_samples)` are the minimum
+          number of samples for each split.
+
+    random_state : int, RandomState instance or None, optional (default=None)
+        If int, random_state is the seed used by the random number generator;
+        If RandomState instance, random_state is the random number generator;
+        If None, the random number generator is the RandomState instance used
+        by `np.random`.
+    """
     def __init__(self,
                  max_depth=None,
                  min_samples_split=2,

@@ -593,7 +593,7 @@ cdef class Tree:
             return self._apply_dense(X)
 
     cpdef tuple predict(self, object X, bint return_std):
-        """Finds the terminal region (=leaf node) for each sample in X."""
+        """Predicts the regressor label and standard deviation for all samples."""
 
         # Check input
         if not isinstance(X, np.ndarray):

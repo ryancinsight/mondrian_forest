@@ -664,6 +664,7 @@ cdef class MondrianSplitter(BaseDenseSplitter):
                                    self.presort), self.__getstate__())
 
     cdef void set_bounds(self) nogil:
+        """Sets lower bounds and upper bounds of every feature."""
         cdef SIZE_t n_features = self.n_features
 
         safe_realloc(&self.lower_bounds, n_features)
@@ -698,15 +699,19 @@ cdef class MondrianSplitter(BaseDenseSplitter):
                         SIZE_t* n_constant_features) nogil except -1:
         """Find the mondrian split on node samples[start:end]
 
-        In contrast to the standard decision-tree split, the split
-        feature and split threshold is determined independent of the labels.
+        Both the split feature and split threshold are determined independently
+        of the labels.
 
         1. The upper bounds u_j and lower bounds l_j of all features in a
            given node j are determined.
         2. The split feature is drawn with a probability proportional to
            u_j - l_j.
-        3. After choosing the split feature delta, the split location is drawn
+        3. After choosing the split feature, the split location is drawn
            uniformly between the upper and lower bound of the split feature.
+
+        In addition to the split feature and threshold, the time of split
+        tau is also stored which is sampled from an exponential with rate
+        equal to the sum of the difference across all dimensions.
 
         Returns -1 in case of failure to allocate memory (and raise MemoryError)
         or 0 otherwise.
