@@ -30,6 +30,7 @@ cdef struct SplitRecord:
     double improvement     # Impurity improvement given parent node.
     double impurity_left   # Impurity of the left split.
     double impurity_right  # Impurity of the right split.
+    double E               # Time of split.
 
 cdef class Splitter:
     # The splitter searches in the input space for a feature and a threshold
@@ -63,6 +64,9 @@ cdef class Splitter:
     cdef DOUBLE_t* y
     cdef SIZE_t y_stride
     cdef DOUBLE_t* sample_weight
+    cdef DTYPE_t* upper_bounds           # Store the upper_bounds
+    cdef DTYPE_t* lower_bounds           # Store the lower bounds
+
 
     # The samples vector `samples` is maintained by the Splitter object such
     # that the samples contained in a node are contiguous. With this setting,
@@ -96,3 +100,5 @@ cdef class Splitter:
     cdef void node_value(self, double* dest) nogil
 
     cdef double node_impurity(self) nogil
+
+    cdef void set_bounds(self) nogil

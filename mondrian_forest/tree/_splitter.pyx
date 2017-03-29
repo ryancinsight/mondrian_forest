@@ -19,8 +19,10 @@ from ._criterion cimport Criterion
 
 from libc.stdlib cimport free
 from libc.stdlib cimport qsort
+from libc.stdlib cimport malloc
 from libc.string cimport memcpy
 from libc.string cimport memset
+from libc.math cimport log as ln
 
 import numpy as np
 cimport numpy as np
@@ -238,6 +240,8 @@ cdef class Splitter:
 
         return self.criterion.node_impurity()
 
+    cdef void set_bounds(self) nogil:
+        pass
 
 cdef class BaseDenseSplitter(Splitter):
     cdef DTYPE_t* X
@@ -424,7 +428,7 @@ cdef class BestSplitter(BaseDenseSplitter):
                     p = start
                     feature_idx_offset = self.X_idx_sorted_stride * current.feature
 
-                    for i in range(self.n_total_samples): 
+                    for i in range(self.n_total_samples):
                         j = X_idx_sorted[i + feature_idx_offset]
                         if sample_mask[j] == 1:
                             samples[p] = j
@@ -642,6 +646,161 @@ cdef void heapsort(DTYPE_t* Xf, SIZE_t* samples, SIZE_t n) nogil:
         swap(Xf, samples, 0, end)
         sift_down(Xf, samples, 0, end)
         end = end - 1
+
+
+cdef class MondrianSplitter(BaseDenseSplitter):
+    """Splitter that samples a tree from a mondrian process."""
+
+    def __dealloc__(self):
+        free(self.lower_bounds)
+        free(self.upper_bounds)
+
+    def __reduce__(self):
+        return (MondrianSplitter, (self.criterion,
+                                   self.max_features,
+                                   self.min_samples_leaf,
+                                   self.min_weight_leaf,
+                                   self.random_state,
+                                   self.presort), self.__getstate__())
+
+    cdef void set_bounds(self) nogil:
+        """Sets lower bounds and upper bounds of every feature."""
+        cdef SIZE_t n_features = self.n_features
+
+        safe_realloc(&self.lower_bounds, n_features)
+        safe_realloc(&self.upper_bounds, n_features)
+        cdef DTYPE_t upper_bound
+        cdef DTYPE_t lower_bound
+        cdef DTYPE_t* X = self.X
+
+        cdef SIZE_t* samples = self.samples
+        cdef SIZE_t X_sample_stride = self.X_sample_stride
+        cdef SIZE_t X_feature_stride = self.X_feature_stride
+        cdef SIZE_t f_j
+        cdef DTYPE_t current_f
+        cdef SIZE_t p
+        cdef SIZE_t start = self.start
+        cdef SIZE_t end = self.end
+
+        for f_j in range(n_features):
+            upper_bound = -INFINITY
+            lower_bound = INFINITY
+
+            for p in range(start, end):
+                current_f = X[samples[p]*X_sample_stride + f_j*X_feature_stride]
+                if current_f <= lower_bound:
+                    lower_bound = current_f
+                if current_f > upper_bound:
+                    upper_bound = current_f
+            self.upper_bounds[f_j] = upper_bound
+            self.lower_bounds[f_j] = lower_bound
+
+    cdef int node_split(self, double impurity, SplitRecord* split,
+                        SIZE_t* n_constant_features) nogil except -1:
+        """Find the mondrian split on node samples[start:end]
+
+        Both the split feature and split threshold are determined independently
+        of the labels.
+
+        1. The upper bounds u_j and lower bounds l_j of all features in a
+           given node j are determined.
+        2. The split feature is drawn with a probability proportional to
+           u_j - l_j.
+        3. After choosing the split feature, the split location is drawn
+           uniformly between the upper and lower bound of the split feature.
+
+        In addition to the split feature and threshold, the time of split
+        tau is also stored which is sampled from an exponential with rate
+        equal to the sum of the difference across all dimensions.
+
+        Returns -1 in case of failure to allocate memory (and raise MemoryError)
+        or 0 otherwise.
+
+        References
+        ----------
+        * Balaji Lakshminarayanan,
+          Decision Trees and Forests: A probabilistic perspective.
+          Pg 82, Algorithm 6.1 and 6.2
+          http://www.gatsby.ucl.ac.uk/~balaji/balaji-phd-thesis.pdf
+        """
+        cdef SIZE_t* samples = self.samples
+        cdef SIZE_t start = self.start
+        cdef SIZE_t end = self.end
+
+        cdef SIZE_t* features = self.features
+        cdef SIZE_t n_features = self.n_features
+
+        cdef DTYPE_t* X = self.X
+        cdef DTYPE_t* Xf = self.feature_values
+
+        cdef SIZE_t X_sample_stride = self.X_sample_stride
+        cdef SIZE_t X_feature_stride = self.X_feature_stride
+        cdef SIZE_t max_features = self.max_features
+        cdef double min_weight_leaf = self.min_weight_leaf
+        cdef UINT32_t* random_state = &self.rand_r_state
+
+        cdef SIZE_t f_j
+        cdef SIZE_t p
+        cdef SIZE_t tmp
+        cdef SIZE_t feature_stride
+        cdef SIZE_t partition_end
+        cdef DTYPE_t rate = 0.0
+        cdef DTYPE_t upper_bound
+        cdef DTYPE_t lower_bound
+        cdef DTYPE_t* cum_diff = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
+        cdef DTYPE_t search
+
+        self.set_bounds()
+        # Sample E from sum(u_{d} - l_{d})
+        for f_j in range(n_features):
+            upper_bound = self.upper_bounds[f_j]
+            lower_bound = self.lower_bounds[f_j]
+            cum_diff[f_j] = upper_bound - lower_bound
+
+            if f_j != 0:
+                cum_diff[f_j] += cum_diff[f_j - 1]
+            rate += (upper_bound - lower_bound)
+
+        # Sample time of split to be -ln(U) / rate.
+        split.E = -ln(rand_uniform(0.0, 1.0, random_state)) / rate
+
+        # Sample dimension delta with a probability proportional to (u_d - l_d)
+        search = rand_uniform(0.0, cum_diff[n_features-1], random_state)
+        for f_j in range(n_features):
+            if f_j == 0:
+                lower_bound = 0.0
+            else:
+                lower_bound = cum_diff[f_j - 1]
+            if cum_diff[f_j] >= search and lower_bound < search:
+                split.feature = f_j
+                break
+
+        # Sample location xi uniformly between (l_d[delta], u_d[delta])
+        split.threshold = rand_uniform(
+            self.lower_bounds[split.feature],
+            self.upper_bounds[split.feature],
+            random_state)
+
+        # Reorganize into samples[start:best.pos] + samples[best.pos:end]
+        feature_stride = X_feature_stride * split.feature
+        partition_end = end
+        p = start
+        while p < partition_end:
+            if X[X_sample_stride * samples[p] + feature_stride] <= split.threshold:
+                p += 1
+            else:
+                partition_end -= 1
+                tmp = samples[partition_end]
+                samples[partition_end] = samples[p]
+                samples[p] = tmp
+
+        split.pos = p
+        self.criterion.reset()
+        self.criterion.update(split.pos)
+        self.criterion.children_impurity(&split.impurity_left,
+                                         &split.impurity_right)
+        free(cum_diff)
+        return 0
 
 
 cdef class RandomSplitter(BaseDenseSplitter):
