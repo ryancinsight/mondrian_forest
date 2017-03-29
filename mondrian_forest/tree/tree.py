@@ -55,16 +55,9 @@ __all__ = ["DecisionTreeClassifier",
 DTYPE = _tree.DTYPE
 DOUBLE = _tree.DOUBLE
 
-CRITERIA_CLF = {"gini": _criterion.Gini, "entropy": _criterion.Entropy}
-CRITERIA_REG = {"mse": _criterion.MSE, "friedman_mse": _criterion.FriedmanMSE,
-                "mae": _criterion.MAE}
+CRITERIA_REG = {"mse": _criterion.MSE}
 
-DENSE_SPLITTERS = {"best": _splitter.BestSplitter,
-                   "random": _splitter.RandomSplitter,
-                   "mondrian": _splitter.MondrianSplitter}
-
-SPARSE_SPLITTERS = {"best": _splitter.BestSparseSplitter,
-                    "random": _splitter.RandomSparseSplitter}
+DENSE_SPLITTERS = {"mondrian": _splitter.MondrianSplitter}
 
 # =============================================================================
 # Base decision tree
@@ -108,7 +101,10 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
     def fit(self, X, y, sample_weight=None, check_input=True,
             X_idx_sorted=None):
 
+        if issparse(X):
+            raise ValueError("No support for sparse input.")
         random_state = check_random_state(self.random_state)
+
         if check_input:
             X = check_array(X, dtype=DTYPE, accept_sparse="csc")
             y = check_array(y, ensure_2d=False, dtype=None)
@@ -327,12 +323,10 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
         self.tree_ = Tree(self.n_features_, self.n_classes_, self.n_outputs_)
 
         # Use BestFirst if max_leaf_nodes given; use DepthFirst otherwise
-        if max_leaf_nodes < 0:
-            builder = DepthFirstTreeBuilder(splitter, min_samples_split,
-                                            min_samples_leaf,
-                                            min_weight_leaf,
-                                            max_depth, self.min_impurity_split)
-
+        builder = DepthFirstTreeBuilder(splitter, min_samples_split,
+                                        min_samples_leaf,
+                                        min_weight_leaf,
+                                        max_depth, self.min_impurity_split)
         builder.build(self.tree_, X, y, sample_weight, X_idx_sorted)
 
         if self.n_outputs_ == 1:
@@ -470,677 +464,20 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator)):
         X = self._validate_X_predict(X, check_input)
         return self.tree_.decision_path(X)
 
-    def weighted_decision_path(self, X, check_input=True):
-        """
-        Returns the weighted decision path in the tree.
-
-        Each non-zero value in the decision path determines the weight
-        of that particular node in making predictions.
-
-        Parameters
-        ----------
-        X : array_like or sparse matrix, shape = [n_samples, n_features]
-            The input samples. Internally, it will be converted to
-            ``dtype=np.float32`` and if a sparse matrix is provided
-            to a sparse ``csr_matrix``.
-
-        check_input : boolean, (default=True)
-            Allow to bypass several input checking.
-            Don't use this parameter unless you know what you do.
-
-        Returns
-        -------
-        indicator : sparse csr array, shape = [n_samples, n_nodes]
-            Return a node indicator matrix where non zero elements
-            indicate the weight of that particular node in making predictions.
-        """
-        X = self._validate_X_predict(X, check_input)
-        return self.tree_.weighted_decision_path(X)
-
     @property
     def feature_importances_(self):
         """Return the feature importances.
-
         The importance of a feature is computed as the (normalized) total
         reduction of the criterion brought by that feature.
         It is also known as the Gini importance.
-
         Returns
         -------
         feature_importances_ : array, shape = [n_features]
         """
         check_is_fitted(self, 'tree_')
-
         return self.tree_.compute_feature_importances()
 
-
-# =============================================================================
-# Public estimators
-# =============================================================================
-
-class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
-    """A decision tree classifier.
-
-    Read more in the :ref:`User Guide <tree>`.
-
-    Parameters
-    ----------
-    criterion : string, optional (default="gini")
-        The function to measure the quality of a split. Supported criteria are
-        "gini" for the Gini impurity and "entropy" for the information gain.
-
-    splitter : string, optional (default="best")
-        The strategy used to choose the split at each node. Supported
-        strategies are "best" to choose the best split and "random" to choose
-        the best random split.
-
-    max_features : int, float, string or None, optional (default=None)
-        The number of features to consider when looking for the best split:
-
-            - If int, then consider `max_features` features at each split.
-            - If float, then `max_features` is a percentage and
-              `int(max_features * n_features)` features are considered at each
-              split.
-            - If "auto", then `max_features=sqrt(n_features)`.
-            - If "sqrt", then `max_features=sqrt(n_features)`.
-            - If "log2", then `max_features=log2(n_features)`.
-            - If None, then `max_features=n_features`.
-
-        Note: the search for a split does not stop until at least one
-        valid partition of the node samples is found, even if it requires to
-        effectively inspect more than ``max_features`` features.
-
-    max_depth : int or None, optional (default=None)
-        The maximum depth of the tree. If None, then nodes are expanded until
-        all leaves are pure or until all leaves contain less than
-        min_samples_split samples.
-
-    min_samples_split : int, float, optional (default=2)
-        The minimum number of samples required to split an internal node:
-
-        - If int, then consider `min_samples_split` as the minimum number.
-        - If float, then `min_samples_split` is a percentage and
-          `ceil(min_samples_split * n_samples)` are the minimum
-          number of samples for each split.
-
-        .. versionchanged:: 0.18
-           Added float values for percentages.
-
-    min_samples_leaf : int, float, optional (default=1)
-        The minimum number of samples required to be at a leaf node:
-
-        - If int, then consider `min_samples_leaf` as the minimum number.
-        - If float, then `min_samples_leaf` is a percentage and
-          `ceil(min_samples_leaf * n_samples)` are the minimum
-          number of samples for each node.
-
-        .. versionchanged:: 0.18
-           Added float values for percentages.
-
-    min_weight_fraction_leaf : float, optional (default=0.)
-        The minimum weighted fraction of the sum total of weights (of all
-        the input samples) required to be at a leaf node. Samples have
-        equal weight when sample_weight is not provided.
-
-    max_leaf_nodes : int or None, optional (default=None)
-        Grow a tree with ``max_leaf_nodes`` in best-first fashion.
-        Best nodes are defined as relative reduction in impurity.
-        If None then unlimited number of leaf nodes.
-
-    class_weight : dict, list of dicts, "balanced" or None, optional (default=None)
-        Weights associated with classes in the form ``{class_label: weight}``.
-        If not given, all classes are supposed to have weight one. For
-        multi-output problems, a list of dicts can be provided in the same
-        order as the columns of y.
-
-        The "balanced" mode uses the values of y to automatically adjust
-        weights inversely proportional to class frequencies in the input data
-        as ``n_samples / (n_classes * np.bincount(y))``
-
-        For multi-output, the weights of each column of y will be multiplied.
-
-        Note that these weights will be multiplied with sample_weight (passed
-        through the fit method) if sample_weight is specified.
-
-    random_state : int, RandomState instance or None, optional (default=None)
-        If int, random_state is the seed used by the random number generator;
-        If RandomState instance, random_state is the random number generator;
-        If None, the random number generator is the RandomState instance used
-        by `np.random`.
-
-    min_impurity_split : float, optional (default=1e-7)
-        Threshold for early stopping in tree growth. A node will split
-        if its impurity is above the threshold, otherwise it is a leaf.
-
-        .. versionadded:: 0.18
-
-    presort : bool, optional (default=False)
-        Whether to presort the data to speed up the finding of best splits in
-        fitting. For the default settings of a decision tree on large
-        datasets, setting this to true may slow down the training process.
-        When using either a smaller dataset or a restricted depth, this may
-        speed up the training.
-
-    Attributes
-    ----------
-    classes_ : array of shape = [n_classes] or a list of such arrays
-        The classes labels (single output problem),
-        or a list of arrays of class labels (multi-output problem).
-
-    feature_importances_ : array of shape = [n_features]
-        The feature importances. The higher, the more important the
-        feature. The importance of a feature is computed as the (normalized)
-        total reduction of the criterion brought by that feature.  It is also
-        known as the Gini importance [4]_.
-
-    max_features_ : int,
-        The inferred value of max_features.
-
-    n_classes_ : int or list
-        The number of classes (for single output problems),
-        or a list containing the number of classes for each
-        output (for multi-output problems).
-
-    n_features_ : int
-        The number of features when ``fit`` is performed.
-
-    n_outputs_ : int
-        The number of outputs when ``fit`` is performed.
-
-    tree_ : Tree object
-        The underlying Tree object.
-
-    See also
-    --------
-    DecisionTreeRegressor
-
-    References
-    ----------
-
-    .. [1] https://en.wikipedia.org/wiki/Decision_tree_learning
-
-    .. [2] L. Breiman, J. Friedman, R. Olshen, and C. Stone, "Classification
-           and Regression Trees", Wadsworth, Belmont, CA, 1984.
-
-    .. [3] T. Hastie, R. Tibshirani and J. Friedman. "Elements of Statistical
-           Learning", Springer, 2009.
-
-    .. [4] L. Breiman, and A. Cutler, "Random Forests",
-           http://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm
-
-    Examples
-    --------
-    >>> from sklearn.datasets import load_iris
-    >>> from sklearn.model_selection import cross_val_score
-    >>> from sklearn.tree import DecisionTreeClassifier
-    >>> clf = DecisionTreeClassifier(random_state=0)
-    >>> iris = load_iris()
-    >>> cross_val_score(clf, iris.data, iris.target, cv=10)
-    ...                             # doctest: +SKIP
-    ...
-    array([ 1.     ,  0.93...,  0.86...,  0.93...,  0.93...,
-            0.93...,  0.93...,  1.     ,  0.93...,  1.      ])
-    """
-    def __init__(self,
-                 criterion="gini",
-                 splitter="best",
-                 max_depth=None,
-                 min_samples_split=2,
-                 min_samples_leaf=1,
-                 min_weight_fraction_leaf=0.,
-                 max_features=None,
-                 random_state=None,
-                 max_leaf_nodes=None,
-                 min_impurity_split=1e-7,
-                 class_weight=None,
-                 presort=False):
-        super(DecisionTreeClassifier, self).__init__(
-            criterion=criterion,
-            splitter=splitter,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,
-            min_weight_fraction_leaf=min_weight_fraction_leaf,
-            max_features=max_features,
-            max_leaf_nodes=max_leaf_nodes,
-            class_weight=class_weight,
-            random_state=random_state,
-            min_impurity_split=min_impurity_split,
-            presort=presort)
-
-    def fit(self, X, y, sample_weight=None, check_input=True,
-            X_idx_sorted=None):
-        """Build a decision tree classifier from the training set (X, y).
-
-        Parameters
-        ----------
-        X : array-like or sparse matrix, shape = [n_samples, n_features]
-            The training input samples. Internally, it will be converted to
-            ``dtype=np.float32`` and if a sparse matrix is provided
-            to a sparse ``csc_matrix``.
-
-        y : array-like, shape = [n_samples] or [n_samples, n_outputs]
-            The target values (class labels) as integers or strings.
-
-        sample_weight : array-like, shape = [n_samples] or None
-            Sample weights. If None, then samples are equally weighted. Splits
-            that would create child nodes with net zero or negative weight are
-            ignored while searching for a split in each node. Splits are also
-            ignored if they would result in any single class carrying a
-            negative weight in either child node.
-
-        check_input : boolean, (default=True)
-            Allow to bypass several input checking.
-            Don't use this parameter unless you know what you do.
-
-        X_idx_sorted : array-like, shape = [n_samples, n_features], optional
-            The indexes of the sorted training input samples. If many tree
-            are grown on the same dataset, this allows the ordering to be
-            cached between trees. If None, the data will be sorted here.
-            Don't use this parameter unless you know what to do.
-
-        Returns
-        -------
-        self : object
-            Returns self.
-        """
-
-        super(DecisionTreeClassifier, self).fit(
-            X, y,
-            sample_weight=sample_weight,
-            check_input=check_input,
-            X_idx_sorted=X_idx_sorted)
-        return self
-
-    def predict_proba(self, X, check_input=True):
-        """Predict class probabilities of the input samples X.
-
-        The predicted class probability is the fraction of samples of the same
-        class in a leaf.
-
-        check_input : boolean, (default=True)
-            Allow to bypass several input checking.
-            Don't use this parameter unless you know what you do.
-
-        Parameters
-        ----------
-        X : array-like or sparse matrix of shape = [n_samples, n_features]
-            The input samples. Internally, it will be converted to
-            ``dtype=np.float32`` and if a sparse matrix is provided
-            to a sparse ``csr_matrix``.
-
-        Returns
-        -------
-        p : array of shape = [n_samples, n_classes], or a list of n_outputs
-            such arrays if n_outputs > 1.
-            The class probabilities of the input samples. The order of the
-            classes corresponds to that in the attribute `classes_`.
-        """
-        check_is_fitted(self, 'tree_')
-        X = self._validate_X_predict(X, check_input)
-        proba = self.tree_.predict(X)
-
-        if self.n_outputs_ == 1:
-            proba = proba[:, :self.n_classes_]
-            normalizer = proba.sum(axis=1)[:, np.newaxis]
-            normalizer[normalizer == 0.0] = 1.0
-            proba /= normalizer
-
-            return proba
-
-        else:
-            all_proba = []
-
-            for k in range(self.n_outputs_):
-                proba_k = proba[:, k, :self.n_classes_[k]]
-                normalizer = proba_k.sum(axis=1)[:, np.newaxis]
-                normalizer[normalizer == 0.0] = 1.0
-                proba_k /= normalizer
-                all_proba.append(proba_k)
-
-            return all_proba
-
-    def predict_log_proba(self, X):
-        """Predict class log-probabilities of the input samples X.
-
-        Parameters
-        ----------
-        X : array-like or sparse matrix of shape = [n_samples, n_features]
-            The input samples. Internally, it will be converted to
-            ``dtype=np.float32`` and if a sparse matrix is provided
-            to a sparse ``csr_matrix``.
-
-        Returns
-        -------
-        p : array of shape = [n_samples, n_classes], or a list of n_outputs
-            such arrays if n_outputs > 1.
-            The class log-probabilities of the input samples. The order of the
-            classes corresponds to that in the attribute `classes_`.
-        """
-        proba = self.predict_proba(X)
-
-        if self.n_outputs_ == 1:
-            return np.log(proba)
-
-        else:
-            for k in range(self.n_outputs_):
-                proba[k] = np.log(proba[k])
-
-            return proba
-
-
-class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
-    """A decision tree regressor.
-
-    Read more in the :ref:`User Guide <tree>`.
-
-    Parameters
-    ----------
-    criterion : string, optional (default="mse")
-        The function to measure the quality of a split. Supported criteria
-        are "mse" for the mean squared error, which is equal to variance
-        reduction as feature selection criterion, and "mae" for the mean
-        absolute error.
-
-        .. versionadded:: 0.18
-           Mean Absolute Error (MAE) criterion.
-
-    splitter : string, optional (default="best")
-        The strategy used to choose the split at each node. Supported
-        strategies are "best" to choose the best split and "random" to choose
-        the best random split.
-
-    max_features : int, float, string or None, optional (default=None)
-        The number of features to consider when looking for the best split:
-
-        - If int, then consider `max_features` features at each split.
-        - If float, then `max_features` is a percentage and
-          `int(max_features * n_features)` features are considered at each
-          split.
-        - If "auto", then `max_features=n_features`.
-        - If "sqrt", then `max_features=sqrt(n_features)`.
-        - If "log2", then `max_features=log2(n_features)`.
-        - If None, then `max_features=n_features`.
-
-        Note: the search for a split does not stop until at least one
-        valid partition of the node samples is found, even if it requires to
-        effectively inspect more than ``max_features`` features.
-
-    max_depth : int or None, optional (default=None)
-        The maximum depth of the tree. If None, then nodes are expanded until
-        all leaves are pure or until all leaves contain less than
-        min_samples_split samples.
-
-    min_samples_split : int, float, optional (default=2)
-        The minimum number of samples required to split an internal node:
-
-        - If int, then consider `min_samples_split` as the minimum number.
-        - If float, then `min_samples_split` is a percentage and
-          `ceil(min_samples_split * n_samples)` are the minimum
-          number of samples for each split.
-
-        .. versionchanged:: 0.18
-           Added float values for percentages.
-
-    min_samples_leaf : int, float, optional (default=1)
-        The minimum number of samples required to be at a leaf node:
-
-        - If int, then consider `min_samples_leaf` as the minimum number.
-        - If float, then `min_samples_leaf` is a percentage and
-          `ceil(min_samples_leaf * n_samples)` are the minimum
-          number of samples for each node.
-
-        .. versionchanged:: 0.18
-           Added float values for percentages.
-
-    min_weight_fraction_leaf : float, optional (default=0.)
-        The minimum weighted fraction of the sum total of weights (of all
-        the input samples) required to be at a leaf node. Samples have
-        equal weight when sample_weight is not provided.
-
-    max_leaf_nodes : int or None, optional (default=None)
-        Grow a tree with ``max_leaf_nodes`` in best-first fashion.
-        Best nodes are defined as relative reduction in impurity.
-        If None then unlimited number of leaf nodes.
-
-    random_state : int, RandomState instance or None, optional (default=None)
-        If int, random_state is the seed used by the random number generator;
-        If RandomState instance, random_state is the random number generator;
-        If None, the random number generator is the RandomState instance used
-        by `np.random`.
-
-    min_impurity_split : float, optional (default=1e-7)
-        Threshold for early stopping in tree growth. If the impurity
-        of a node is below the threshold, the node is a leaf.
-
-        .. versionadded:: 0.18
-
-    presort : bool, optional (default=False)
-        Whether to presort the data to speed up the finding of best splits in
-        fitting. For the default settings of a decision tree on large
-        datasets, setting this to true may slow down the training process.
-        When using either a smaller dataset or a restricted depth, this may
-        speed up the training.
-
-    Attributes
-    ----------
-    feature_importances_ : array of shape = [n_features]
-        The feature importances.
-        The higher, the more important the feature.
-        The importance of a feature is computed as the
-        (normalized) total reduction of the criterion brought
-        by that feature. It is also known as the Gini importance [4]_.
-
-    max_features_ : int,
-        The inferred value of max_features.
-
-    n_features_ : int
-        The number of features when ``fit`` is performed.
-
-    n_outputs_ : int
-        The number of outputs when ``fit`` is performed.
-
-    tree_ : Tree object
-        The underlying Tree object.
-
-    See also
-    --------
-    DecisionTreeClassifier
-
-    References
-    ----------
-
-    .. [1] https://en.wikipedia.org/wiki/Decision_tree_learning
-
-    .. [2] L. Breiman, J. Friedman, R. Olshen, and C. Stone, "Classification
-           and Regression Trees", Wadsworth, Belmont, CA, 1984.
-
-    .. [3] T. Hastie, R. Tibshirani and J. Friedman. "Elements of Statistical
-           Learning", Springer, 2009.
-
-    .. [4] L. Breiman, and A. Cutler, "Random Forests",
-           http://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm
-
-    Examples
-    --------
-    >>> from sklearn.datasets import load_boston
-    >>> from sklearn.model_selection import cross_val_score
-    >>> from sklearn.tree import DecisionTreeRegressor
-    >>> boston = load_boston()
-    >>> regressor = DecisionTreeRegressor(random_state=0)
-    >>> cross_val_score(regressor, boston.data, boston.target, cv=10)
-    ...                    # doctest: +SKIP
-    ...
-    array([ 0.61..., 0.57..., -0.34..., 0.41..., 0.75...,
-            0.07..., 0.29..., 0.33..., -1.42..., -1.77...])
-    """
-    def __init__(self,
-                 criterion="mse",
-                 splitter="best",
-                 max_depth=None,
-                 min_samples_split=2,
-                 min_samples_leaf=1,
-                 min_weight_fraction_leaf=0.,
-                 max_features=None,
-                 random_state=None,
-                 max_leaf_nodes=None,
-                 min_impurity_split=1e-7,
-                 presort=False):
-        super(DecisionTreeRegressor, self).__init__(
-            criterion=criterion,
-            splitter=splitter,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,
-            min_weight_fraction_leaf=min_weight_fraction_leaf,
-            max_features=max_features,
-            max_leaf_nodes=max_leaf_nodes,
-            random_state=random_state,
-            min_impurity_split=min_impurity_split,
-            presort=presort)
-
-    def fit(self, X, y, sample_weight=None, check_input=True,
-            X_idx_sorted=None):
-        """Build a decision tree regressor from the training set (X, y).
-
-        Parameters
-        ----------
-        X : array-like or sparse matrix, shape = [n_samples, n_features]
-            The training input samples. Internally, it will be converted to
-            ``dtype=np.float32`` and if a sparse matrix is provided
-            to a sparse ``csc_matrix``.
-
-        y : array-like, shape = [n_samples] or [n_samples, n_outputs]
-            The target values (real numbers). Use ``dtype=np.float64`` and
-            ``order='C'`` for maximum efficiency.
-
-        sample_weight : array-like, shape = [n_samples] or None
-            Sample weights. If None, then samples are equally weighted. Splits
-            that would create child nodes with net zero or negative weight are
-            ignored while searching for a split in each node.
-
-        check_input : boolean, (default=True)
-            Allow to bypass several input checking.
-            Don't use this parameter unless you know what you do.
-
-        X_idx_sorted : array-like, shape = [n_samples, n_features], optional
-            The indexes of the sorted training input samples. If many tree
-            are grown on the same dataset, this allows the ordering to be
-            cached between trees. If None, the data will be sorted here.
-            Don't use this parameter unless you know what to do.
-
-        Returns
-        -------
-        self : object
-            Returns self.
-        """
-
-        super(DecisionTreeRegressor, self).fit(
-            X, y,
-            sample_weight=sample_weight,
-            check_input=check_input,
-            X_idx_sorted=X_idx_sorted)
-        return self
-
-
-class ExtraTreeClassifier(DecisionTreeClassifier):
-    """An extremely randomized tree classifier.
-
-    Extra-trees differ from classic decision trees in the way they are built.
-    When looking for the best split to separate the samples of a node into two
-    groups, random splits are drawn for each of the `max_features` randomly
-    selected features and the best split among those is chosen. When
-    `max_features` is set 1, this amounts to building a totally random
-    decision tree.
-
-    Warning: Extra-trees should only be used within ensemble methods.
-
-    Read more in the :ref:`User Guide <tree>`.
-
-    See also
-    --------
-    ExtraTreeRegressor, ExtraTreesClassifier, ExtraTreesRegressor
-
-    References
-    ----------
-
-    .. [1] P. Geurts, D. Ernst., and L. Wehenkel, "Extremely randomized trees",
-           Machine Learning, 63(1), 3-42, 2006.
-    """
-    def __init__(self,
-                 criterion="gini",
-                 splitter="random",
-                 max_depth=None,
-                 min_samples_split=2,
-                 min_samples_leaf=1,
-                 min_weight_fraction_leaf=0.,
-                 max_features="auto",
-                 random_state=None,
-                 max_leaf_nodes=None,
-                 min_impurity_split=1e-7,
-                 class_weight=None):
-        super(ExtraTreeClassifier, self).__init__(
-            criterion=criterion,
-            splitter=splitter,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,
-            min_weight_fraction_leaf=min_weight_fraction_leaf,
-            max_features=max_features,
-            max_leaf_nodes=max_leaf_nodes,
-            class_weight=class_weight,
-            min_impurity_split=min_impurity_split,
-            random_state=random_state)
-
-
-class ExtraTreeRegressor(DecisionTreeRegressor):
-    """An extremely randomized tree regressor.
-
-    Extra-trees differ from classic decision trees in the way they are built.
-    When looking for the best split to separate the samples of a node into two
-    groups, random splits are drawn for each of the `max_features` randomly
-    selected features and the best split among those is chosen. When
-    `max_features` is set 1, this amounts to building a totally random
-    decision tree.
-
-    Warning: Extra-trees should only be used within ensemble methods.
-
-    Read more in the :ref:`User Guide <tree>`.
-
-    See also
-    --------
-    ExtraTreeClassifier, ExtraTreesClassifier, ExtraTreesRegressor
-
-    References
-    ----------
-
-    .. [1] P. Geurts, D. Ernst., and L. Wehenkel, "Extremely randomized trees",
-           Machine Learning, 63(1), 3-42, 2006.
-    """
-    def __init__(self,
-                 criterion="mse",
-                 splitter="random",
-                 max_depth=None,
-                 min_samples_split=2,
-                 min_samples_leaf=1,
-                 min_weight_fraction_leaf=0.,
-                 max_features="auto",
-                 random_state=None,
-                 min_impurity_split=1e-7):
-        super(ExtraTreeRegressor, self).__init__(
-            criterion=criterion,
-            splitter=splitter,
-            max_depth=max_depth,
-            min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,
-            min_weight_fraction_leaf=min_weight_fraction_leaf,
-            max_features=max_features,
-            max_leaf_nodes=max_leaf_nodes,
-            min_impurity_split=min_impurity_split,
-            random_state=random_state)
-
-
-class MondrianTreeRegressor(DecisionTreeRegressor):
+class MondrianTreeRegressor(BaseDecisionTree, RegressorMixin):
     """A Mondrian tree regressor.
 
     The splits in a mondrian tree regressor differ from the standard regression
@@ -1195,4 +532,73 @@ class MondrianTreeRegressor(DecisionTreeRegressor):
             splitter="mondrian",
             max_depth=max_depth,
             min_samples_split=min_samples_split,
-            random_state=random_state)
+            min_samples_leaf=1,
+            min_weight_fraction_leaf=0.0,
+            max_features=None,
+            random_state=random_state,
+            max_leaf_nodes=None,
+            min_impurity_split=1e-7,
+            presort=False)
+
+    def fit(self, X, y, check_input=True, X_idx_sorted=None):
+        """Build a mondrian tree regressor from the training set (X, y).
+
+        Parameters
+        ----------
+        X : array-like or sparse matrix, shape = [n_samples, n_features]
+            The training input samples. Internally, it will be converted to
+            ``dtype=np.float32`` and if a sparse matrix is provided
+            to a sparse ``csc_matrix``.
+
+        y : array-like, shape = [n_samples] or [n_samples, n_outputs]
+            The target values (real numbers). Use ``dtype=np.float64`` and
+            ``order='C'`` for maximum efficiency.
+
+        check_input : boolean, (default=True)
+            Allow to bypass several input checking.
+            Don't use this parameter unless you know what you do.
+
+        X_idx_sorted : array-like, shape = [n_samples, n_features], optional
+            The indexes of the sorted training input samples. If many tree
+            are grown on the same dataset, this allows the ordering to be
+            cached between trees. If None, the data will be sorted here.
+            Don't use this parameter unless you know what to do.
+
+        Returns
+        -------
+        self : object
+            Returns self.
+        """
+        super(MondrianTreeRegressor, self).fit(
+            X, y,
+            sample_weight=None,
+            check_input=check_input,
+            X_idx_sorted=X_idx_sorted)
+        return self
+
+    def weighted_decision_path(self, X, check_input=True):
+        """
+        Returns the weighted decision path in the tree.
+
+        Each non-zero value in the decision path determines the weight
+        of that particular node in making predictions.
+
+        Parameters
+        ----------
+        X : array_like or sparse matrix, shape = [n_samples, n_features]
+            The input samples. Internally, it will be converted to
+            ``dtype=np.float32`` and if a sparse matrix is provided
+            to a sparse ``csr_matrix``.
+
+        check_input : boolean, (default=True)
+            Allow to bypass several input checking.
+            Don't use this parameter unless you know what you do.
+
+        Returns
+        -------
+        indicator : sparse csr array, shape = [n_samples, n_nodes]
+            Return a node indicator matrix where non zero elements
+            indicate the weight of that particular node in making predictions.
+        """
+        X = self._validate_X_predict(X, check_input)
+        return self.tree_.weighted_decision_path(X)
