@@ -636,12 +636,11 @@ cdef class Tree:
                                 fmax(node.lower_bounds[f_ind] - X_val, 0))
 
                     # Step 6: Calculate p_j
-                    p_js = 1 - exp(-Delta * eta)
-
                     # Step 7-11
                     if node.left_child == _TREE_LEAF:
                         w_j = p_nsy
                     else:
+                        p_js = 1 - exp(-Delta * eta)
                         w_j = p_nsy * p_js
 
                     mean[i] += w_j * node.mean
@@ -662,6 +661,8 @@ cdef class Tree:
 
                 if return_std:
                     std[i] -= mean[i]**2
+                    if std[i] <= 0:
+                        std[i] = 0.0
                     std[i] = sqrt(std[i])
 
         if return_std:

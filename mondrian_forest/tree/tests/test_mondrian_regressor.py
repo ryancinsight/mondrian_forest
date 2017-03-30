@@ -9,6 +9,7 @@ from sklearn.utils.testing import assert_array_almost_equal
 from sklearn.utils.testing import assert_array_less
 from sklearn.utils.testing import assert_almost_equal
 from sklearn.utils.testing import assert_less
+from sklearn.utils.testing import assert_false
 
 from mondrian_forest import MondrianTreeRegressor
 
@@ -229,3 +230,20 @@ def test_node_weights():
     means2, std2 = mtr.predict(X_test, return_std=True)
     assert_array_almost_equal(means1, means2, 5)
     assert_array_almost_equal(variances1, std2**2, 3)
+
+
+def test_std_positive():
+    """Sometimes std can be slightly negative due to numerical errors."""
+    X = np.linspace(-np.pi, np.pi, 20.0)
+    y = 2*np.sin(X)
+    X_train = np.reshape(X, (-1, 1))
+    mr = MondrianTreeRegressor(random_state=0)
+    mr.fit(X_train, y)
+
+    X_test = np.array(
+        [[2.87878788],
+         [2.97979798],
+         [3.08080808]])
+    _, y_std = mr.predict(X_test, return_std=True)
+    assert_false(np.any(np.isnan(y_std)))
+    assert_false(np.any(np.isinf(y_std)))
