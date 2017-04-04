@@ -233,7 +233,7 @@ def test_node_weights():
 
 
 def test_std_positive():
-    """Sometimes std can be slightly negative due to numerical errors."""
+    """Sometimes variance can be slightly negative due to numerical errors."""
     X = np.linspace(-np.pi, np.pi, 20.0)
     y = 2*np.sin(X)
     X_train = np.reshape(X, (-1, 1))
@@ -247,3 +247,27 @@ def test_std_positive():
     _, y_std = mr.predict(X_test, return_std=True)
     assert_false(np.any(np.isnan(y_std)))
     assert_false(np.any(np.isinf(y_std)))
+
+
+def test_mean_std():
+    boston = load_boston()
+    X, y = boston.data, boston.target
+    X = MinMaxScaler().fit_transform(X)
+    mr = MondrianTreeRegressor(random_state=0)
+    mr.fit(X, y)
+
+    # For points completely in the training data.
+    # mean should converge to the actual target value.
+    # variance should converge to 0.0
+    mean, std = mr.predict(X, return_std=True)
+    assert_array_almost_equal(mean, y, 5)
+    assert_array_almost_equal(std, 0.0, 2)
+
+    # For points completely far away from the training data, this
+    # should converge to the empirical mean and variance.
+    # X is scaled between to -1.0 and 1.0
+    X_inf = np.vstack((20.0 * np.ones(X.shape[1]),
+                       -20.0 * np.ones(X.shape[1])))
+    inf_mean, inf_std = mr.predict(X_inf, return_std=True)
+    assert_array_almost_equal(inf_mean, y.mean(), 1)
+    assert_array_almost_equal(inf_std, y.std(), 2)
