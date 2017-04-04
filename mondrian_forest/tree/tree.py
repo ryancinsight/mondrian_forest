@@ -540,7 +540,7 @@ class MondrianTreeRegressor(BaseDecisionTree, RegressorMixin):
             min_impurity_split=1e-7,
             presort=False)
 
-    def fit(self, X, y, check_input=True, X_idx_sorted=None):
+    def fit(self, X, y, sample_weight=None, check_input=True, X_idx_sorted=None):
         """Build a mondrian tree regressor from the training set (X, y).
 
         Parameters
