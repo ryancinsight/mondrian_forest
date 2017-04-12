@@ -29,7 +29,7 @@ conda create -n testenv --yes python=$PYTHON_VERSION pip nose \
    numpy scipy scikit-learn cython
 source activate testenv
 
-$PYTHON_VERSION --version
-$PYTHON_VERSION -c "import numpy; print('numpy %s' % numpy.__version__)"
-$PYTHON_VERSION -c "import scipy; print('scipy %s' % scipy.__version__)"
-$PYTHON_VERSION setup.py develop
+python --version
+python -c "import numpy; print('numpy %s' % numpy.__version__)"
+python -c "import scipy; print('scipy %s' % scipy.__version__)"
+python setup.py develop
