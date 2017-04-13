@@ -26,7 +26,8 @@ popd
 # Configure the conda environment and put it in the path using the
 # provided versions
 conda create -n testenv --yes python=$PYTHON_VERSION pip nose \
-   numpy scipy scikit-learn cython
+   numpy scipy cython
+pip install git+http://github.com/scikit-learn/scikit-learn.git
 source activate testenv
 
 python --version
