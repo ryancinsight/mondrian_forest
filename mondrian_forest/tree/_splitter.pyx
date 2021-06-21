@@ -31,10 +31,13 @@ np.import_array()
 from scipy.sparse import csc_matrix
 
 from ._utils cimport log
+from ._utils cimport rand_exponential
 from ._utils cimport rand_int
+from ._utils cimport rand_multinomial
 from ._utils cimport rand_uniform
 from ._utils cimport RAND_R_MAX
 from ._utils cimport safe_realloc
+
 
 cdef double INFINITY = np.inf
 
@@ -45,27 +48,12 @@ cdef class Splitter:
     sparse and dense data, one split at a time.
     """
 
-    def __cinit__(self, Criterion criterion, SIZE_t max_features,
-                  SIZE_t min_samples_leaf, double min_weight_leaf,
-                  object random_state, bint presort):
+    def __cinit__(self, Criterion criterion, object random_state):
         """
         Parameters
         ----------
         criterion : Criterion
             The criterion to measure the quality of a split.
-
-        max_features : SIZE_t
-            The maximal number of randomly selected features which can be
-            considered for a split.
-
-        min_samples_leaf : SIZE_t
-            The minimal number of samples each leaf can have, where splits
-            which would result in having less samples in a leaf are not
-            considered.
-
-        min_weight_leaf : double
-            The minimal weight each leaf can have, where the weight is the sum
-            of the weights of each sample in it.
 
         random_state : object
             The user inputted random state to be used for pseudo-randomness
@@ -83,11 +71,7 @@ cdef class Splitter:
         self.y_stride = 0
         self.sample_weight = NULL
 
-        self.max_features = max_features
-        self.min_samples_leaf = min_samples_leaf
-        self.min_weight_leaf = min_weight_leaf
         self.random_state = random_state
-        self.presort = presort
 
     def __dealloc__(self):
         """Destructor."""
@@ -239,9 +223,7 @@ cdef class BaseDenseSplitter(Splitter):
     cdef SIZE_t n_total_samples
     cdef SIZE_t* sample_mask
 
-    def __cinit__(self, Criterion criterion, SIZE_t max_features,
-                  SIZE_t min_samples_leaf, double min_weight_leaf,
-                  object random_state, bint presort):
+    def __cinit__(self, Criterion criterion, object random_state):
 
         self.X = NULL
         self.X_sample_stride = 0
@@ -249,12 +231,6 @@ cdef class BaseDenseSplitter(Splitter):
         self.X_idx_sorted_ptr = NULL
         self.X_idx_sorted_stride = 0
         self.sample_mask = NULL
-        self.presort = presort
-
-    def __dealloc__(self):
-        """Destructor."""
-        if self.presort == 1:
-            free(self.sample_mask)
 
     cdef int init(self,
                   object X,
@@ -276,17 +252,6 @@ cdef class BaseDenseSplitter(Splitter):
         self.X = <DTYPE_t*> X_ndarray.data
         self.X_sample_stride = <SIZE_t> X.strides[0] / <SIZE_t> X.itemsize
         self.X_feature_stride = <SIZE_t> X.strides[1] / <SIZE_t> X.itemsize
-
-        if self.presort == 1:
-            self.X_idx_sorted = X_idx_sorted
-            self.X_idx_sorted_ptr = <INT32_t*> self.X_idx_sorted.data
-            self.X_idx_sorted_stride = (<SIZE_t> self.X_idx_sorted.strides[1] /
-                                        <SIZE_t> self.X_idx_sorted.itemsize)
-
-            self.n_total_samples = X.shape[0]
-            safe_realloc(&self.sample_mask, self.n_total_samples)
-            memset(self.sample_mask, 0, self.n_total_samples*sizeof(SIZE_t))
-
         return 0
 
 
@@ -299,11 +264,7 @@ cdef class MondrianSplitter(BaseDenseSplitter):
 
     def __reduce__(self):
         return (MondrianSplitter, (self.criterion,
-                                   self.max_features,
-                                   self.min_samples_leaf,
-                                   self.min_weight_leaf,
-                                   self.random_state,
-                                   self.presort), self.__getstate__())
+                                   self.random_state), self.__getstate__())
 
     cdef void set_bounds(self) nogil:
         """Sets lower bounds and upper bounds of every feature."""
@@ -377,8 +338,6 @@ cdef class MondrianSplitter(BaseDenseSplitter):
 
         cdef SIZE_t X_sample_stride = self.X_sample_stride
         cdef SIZE_t X_feature_stride = self.X_feature_stride
-        cdef SIZE_t max_features = self.max_features
-        cdef double min_weight_leaf = self.min_weight_leaf
         cdef UINT32_t* random_state = &self.rand_r_state
 
         cdef SIZE_t f_j
@@ -389,7 +348,7 @@ cdef class MondrianSplitter(BaseDenseSplitter):
         cdef DTYPE_t rate = 0.0
         cdef DTYPE_t upper_bound
         cdef DTYPE_t lower_bound
-        cdef DTYPE_t* cum_diff = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
+        cdef DTYPE_t* pvals = <DTYPE_t*> malloc(n_features * sizeof(DTYPE_t))
         cdef DTYPE_t search
 
         self.set_bounds()
@@ -397,25 +356,12 @@ cdef class MondrianSplitter(BaseDenseSplitter):
         for f_j in range(n_features):
             upper_bound = self.upper_bounds[f_j]
             lower_bound = self.lower_bounds[f_j]
-            cum_diff[f_j] = upper_bound - lower_bound
-
-            if f_j != 0:
-                cum_diff[f_j] += cum_diff[f_j - 1]
+            pvals[f_j] = upper_bound - lower_bound
             rate += (upper_bound - lower_bound)
 
-        # Sample time of split to be -ln(U) / rate.
-        split.E = -ln(rand_uniform(0.0, 1.0, random_state)) / rate
-
+        split.E = rand_exponential(rate, random_state)
         # Sample dimension delta with a probability proportional to (u_d - l_d)
-        search = rand_uniform(0.0, cum_diff[n_features-1], random_state)
-        for f_j in range(n_features):
-            if f_j == 0:
-                lower_bound = 0.0
-            else:
-                lower_bound = cum_diff[f_j - 1]
-            if cum_diff[f_j] >= search and lower_bound < search:
-                split.feature = f_j
-                break
+        split.feature = rand_multinomial(pvals, n_features, random_state)
 
         # Sample location xi uniformly between (l_d[delta], u_d[delta])
         split.threshold = rand_uniform(
@@ -441,5 +387,5 @@ cdef class MondrianSplitter(BaseDenseSplitter):
         self.criterion.update(split.pos)
         self.criterion.children_impurity(&split.impurity_left,
                                          &split.impurity_right)
-        free(cum_diff)
+        free(pvals)
         return 0

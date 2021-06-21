@@ -4,6 +4,5 @@ classification and regression.
 """
 
 from .tree import MondrianTreeRegressor
-from .export import export_graphviz
 
 __all__ = ["MondrianTreeRegressor"]
