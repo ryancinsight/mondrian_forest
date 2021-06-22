@@ -1,4 +1,4 @@
 from .ensemble import MondrianForestRegressor
 from .tree import MondrianTreeRegressor
 
-__all__ = ["MondrianTreeRegressor","MondrianForestRegressor"]
+__all__ = ["MondrianForestRegressor","MondrianTreeRegressor"]

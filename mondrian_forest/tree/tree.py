@@ -52,7 +52,7 @@ __all__ = ["MondrianTreeRegressor"]
 DTYPE = _tree.DTYPE
 DOUBLE = _tree.DOUBLE
 
-CRITERIA_REG = {"mse": _criterion.MSE}
+CRITERIA_REG = {"mse": _criterion.FriedmanMSE}
 
 SPLITTERS = {"mondrian": _splitter.MondrianSplitter}
 
@@ -358,6 +358,7 @@ class BaseMondrianTree(BaseDecisionTree):
         """
         random_state = check_random_state(self.random_state)
         X, y = check_X_y(X, y, dtype=DTYPE, multi_output=False, order="C")
+        is_classifier = isinstance(self, ClassifierMixin)
         random_state = check_random_state(self.random_state)
         max_depth = ((2 ** 31) - 1 if self.max_depth is None
                      else self.max_depth)
@@ -444,3 +445,4 @@ class MondrianTreeRegressor(BaseMondrianTree, RegressorMixin):
         self: instance of MondrianTree
         """
         return super(MondrianTreeRegressor, self).partial_fit(X, y)
+

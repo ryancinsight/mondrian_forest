@@ -45,9 +45,9 @@ for name in ['_tree', '_splitter', '_criterion', '_utils']:
         sources=['mondrian_forest/tree/{}.pyx'.format(name)],
         include_dirs=[np.get_include()],
         libraries=libraries,
-        extra_compile_args=['/std:c++17','/O2','/GT'],
+        extra_compile_args=['/std:c++17','/O2','/GT','/GL','/MT','/link','/LTCG:incremental'],
     ))
-extensions = cythonize(extensions,compiler_directives={'language_level':'3','infer_types':True})
+extensions = cythonize(extensions)
 
 if __name__ == "__main__":
     setup(name=DISTNAME,
